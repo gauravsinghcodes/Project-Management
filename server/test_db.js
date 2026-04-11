@@ -1,16 +1,15 @@
-import { Pool, neonConfig } from '@neondatabase/serverless';
-import ws from 'ws';
+import { Pool } from '@neondatabase/serverless';
 
-neonConfig.webSocketConstructor = ws;
+process.env.DATABASE_URL = '"postgresql://test:test@host.com/db"';
+
+const connectionString = `${process.env.DATABASE_URL}`;
 
 async function main() {
     try {
-        const pool = new Pool();
-        const res = await pool.query('SELECT 1 as result');
-        console.log("Query result:", res.rows);
-    } catch (e) {
-        console.error("DB Error:", e);
+        const pool = new Pool({ connectionString });
+        console.log("Success pool instance");
+    } catch(e) {
+        console.error("THREW:", e);
     }
 }
-
 main();
