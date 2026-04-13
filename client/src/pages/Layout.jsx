@@ -5,7 +5,7 @@ import { Outlet } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import { loadTheme } from '../features/themeSlice'
 import { Loader2Icon } from 'lucide-react'
-import {useUser, SignIn, useAuth, CreateOrganization, useOrganizationList} from '@clerk/react'
+import {useUser, SignIn, useAuth, CreateOrganization} from '@clerk/react'
 import { fetchWorkspaces } from '../features/workspaceSlice'
 
 const Layout = () => {
@@ -14,9 +14,6 @@ const Layout = () => {
     const dispatch = useDispatch()
     const {user, isLoaded} = useUser()
     const {getToken} = useAuth()
-    const { userMemberships, isLoaded: membershipsLoaded } = useOrganizationList({
-        userMemberships: true,
-    });
 
     // Initial load of theme
     useEffect(() => {
@@ -29,13 +26,6 @@ const Layout = () => {
             dispatch(fetchWorkspaces({getToken}))
         }
     },[user, isLoaded])
-
-    // Re-fetch workspaces when memberships change or Clerk has more orgs than local DB
-    useEffect(() => {
-        if (membershipsLoaded && userMemberships.data?.length > workspaces.length) {
-            dispatch(fetchWorkspaces({ getToken }))
-        }
-    }, [userMemberships.data?.length, membershipsLoaded, workspaces.length])
 
 
     if(!user){
@@ -54,17 +44,8 @@ const Layout = () => {
 
     if(user && workspaces.length === 0){
         return (
-            <div className='min-h-screen flex flex-col justify-center items-center gap-4 bg-white dark:bg-zinc-950'>
+            <div className='min-h-screen flex justify-center items-center'>
                 <CreateOrganization />
-                <div className='flex items-center gap-2 text-sm text-gray-500 dark:text-zinc-400'>
-                    <p>Already created an organization?</p>
-                    <button 
-                        onClick={() => dispatch(fetchWorkspaces({getToken}))}
-                        className='text-blue-500 hover:underline font-medium'
-                    >
-                        Sync Now
-                    </button>
-                </div>
             </div>
         )
     }
