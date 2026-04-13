@@ -40,7 +40,7 @@ const syncUserUpdation = inngest.createFunction(
     async ({ event }) => {
         const { data } = event
         await prisma.user.update({
-            where:{
+            where: {
                 id: data.id
             },
             data: {
@@ -56,7 +56,7 @@ const syncUserUpdation = inngest.createFunction(
 const syncWorkspaceCreation = inngest.createFunction(
     { id: 'sync-workspace-from-clerk', triggers: [{ event: 'clerk/workspace.created' }] },
     async ({ event }) => {
-        const {data} = event;
+        const { data } = event;
         await prisma.workspace.create({
             data: {
                 id: data.id,
