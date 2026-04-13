@@ -5,7 +5,7 @@ import { Outlet } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import { loadTheme } from '../features/themeSlice'
 import { Loader2Icon } from 'lucide-react'
-import {useUser, SignIn, useAuth, CreateOrganization} from '@clerk/react'
+import {useUser, SignIn, useAuth, CreateOrganization, useOrganizationList} from '@clerk/react'
 import { fetchWorkspaces } from '../features/workspaceSlice'
 
 const Layout = () => {
@@ -14,6 +14,9 @@ const Layout = () => {
     const dispatch = useDispatch()
     const {user, isLoaded} = useUser()
     const {getToken} = useAuth()
+    const { userMemberships, isLoaded: membershipsLoaded } = useOrganizationList({
+        userMemberships: true,
+    });
 
     // Initial load of theme
     useEffect(() => {
@@ -26,6 +29,13 @@ const Layout = () => {
             dispatch(fetchWorkspaces({getToken}))
         }
     },[user, isLoaded])
+
+    // Re-fetch workspaces when memberships change or Clerk has more orgs than local DB
+    useEffect(() => {
+        if (membershipsLoaded && userMemberships.data?.length > workspaces.length) {
+            dispatch(fetchWorkspaces({ getToken }))
+        }
+    }, [userMemberships.data?.length, membershipsLoaded, workspaces.length])
 
 
     if(!user){
