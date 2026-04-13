@@ -56,6 +56,15 @@ const Layout = () => {
         return (
             <div className='min-h-screen flex flex-col justify-center items-center gap-4 bg-white dark:bg-zinc-950'>
                 <CreateOrganization />
+                <div className='flex items-center gap-2 text-sm text-gray-500 dark:text-zinc-400'>
+                    <p>Already created an organization?</p>
+                    <button 
+                        onClick={() => dispatch(fetchWorkspaces({getToken}))}
+                        className='text-blue-500 hover:underline font-medium'
+                    >
+                        Sync Now
+                    </button>
+                </div>
             </div>
         )
     }
