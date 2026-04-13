@@ -54,11 +54,19 @@ const syncUserUpdation = inngest.createFunction(
 
 // Inngest Function to save workspace data to a database
 const syncWorkspaceCreation = inngest.createFunction(
-    { id: 'sync-workspace-from-clerk', triggers: [{ event: 'clerk/workspace.created' }] },
+    { id: 'sync-workspace-from-clerk', triggers: [{ event: 'clerk/organization.created' }] },
     async ({ event }) => {
         const { data } = event;
-        await prisma.workspace.create({
-            data: {
+        
+        // Use upsert to be safe if organization.updated arrived first
+        await prisma.workspace.upsert({
+            where: { id: data.id },
+            update: {
+                name: data.name,
+                slug: data.slug,
+                image_url: data.image_url,
+            },
+            create: {
                 id: data.id,
                 name: data.name,
                 slug: data.slug,
@@ -67,14 +75,25 @@ const syncWorkspaceCreation = inngest.createFunction(
             }
         })
 
-        // Add creater as ADMIN member
-        await prisma.workspaceMember.create({
-            data: {
-                userId: data.created_by,
-                workspaceId: data.id,
-                role: "ADMIN"
-            }
-        })
+        // Add creator as ADMIN member
+        try {
+            await prisma.workspaceMember.upsert({
+                where: {
+                    userId_workspaceId: {
+                        userId: data.created_by,
+                        workspaceId: data.id
+                    }
+                },
+                update: { role: "ADMIN" },
+                create: {
+                    userId: data.created_by,
+                    workspaceId: data.id,
+                    role: "ADMIN"
+                }
+            })
+        } catch (error) {
+            console.log("Error syncing creator membership", error)
+        }
     }
 )
 
@@ -83,13 +102,20 @@ const syncWorkspaceUpdation = inngest.createFunction(
     { id: 'update-workspace-from-clerk', triggers: [{ event: 'clerk/organization.updated' }] },
     async ({ event }) => {
         const { data } = event;
-        await prisma.workspace.update({
+        await prisma.workspace.upsert({
             where: {
                 id: data.id
             },
-            data: {
+            update: {
                 name: data.name,
                 slug: data.slug,
+                image_url: data.image_url,
+            },
+            create: {
+                id: data.id,
+                name: data.name,
+                slug: data.slug,
+                ownerId: data.created_by,
                 image_url: data.image_url,
             }
         })
@@ -101,25 +127,47 @@ const syncWorkspaceDeletion = inngest.createFunction(
     { id: 'delete-workspace-with-clerk', triggers: [{ event: 'clerk/organization.deleted' }] },
     async ({ event }) => {
         const { data } = event;
-        await prisma.workspace.delete({
-            where: {
-                id: data.id
-            }
-        })
+        try {
+            await prisma.workspace.delete({
+                where: {
+                    id: data.id
+                }
+            })
+        } catch (error) {
+            console.log("Workspace already deleted or not found", error)
+        }
     }
 )
 
 // Inngest Function to save workspace member data to a database
 
 const syncWorkspaceMemberCreation = inngest.createFunction(
-    { id: 'sync-workspace-member-from-clerk', triggers: [{ event: 'clerk/organizationInvitation.accepted' }] },
+    { id: 'sync-workspace-member-from-clerk', triggers: [
+        { event: 'clerk/organizationMembership.created' },
+        { event: 'clerk/organizationInvitation.accepted' }
+    ] },
     async ({ event }) => {
         const { data } = event;
-        await prisma.workspaceMember.create({
-            data: {
-                userId: data.user_id,
-                workspaceId: data.organization_id,
-                role: String(data.role_name).toUpperCase(),
+        const userId = data.user_id || data.public_user_data?.user_id;
+        const orgId = data.organization_id;
+        const role = data.role || data.role_name;
+
+        if(!userId || !orgId) return;
+
+        await prisma.workspaceMember.upsert({
+            where: {
+                userId_workspaceId: {
+                    userId: userId,
+                    workspaceId: orgId
+                }
+            },
+            update: {
+                role: String(role).toUpperCase().includes("ADMIN") ? "ADMIN" : "MEMBER"
+            },
+            create: {
+                userId: userId,
+                workspaceId: orgId,
+                role: String(role).toUpperCase().includes("ADMIN") ? "ADMIN" : "MEMBER"
             }
         })
     }
