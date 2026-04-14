@@ -145,34 +145,45 @@ const syncWorkspaceDeletion = inngest.createFunction(
 const syncWorkspaceMemberCreation = inngest.createFunction(
     {
         id: 'sync-workspace-member-from-clerk', triggers: [
-            { event: 'clerk/organizationMembership.created' },
-            { event: 'clerk/organizationInvitation.accepted' }
+            { event: 'clerk/organization_membership.created' },
+            { event: 'clerk/organization_invitation.accepted' }
         ]
     },
-    async ({ event }) => {
+    async ({ event, step }) => {
         const { data } = event;
         const userId = data.user_id || data.public_user_data?.user_id;
-        const orgId = data.organization_id;
+        const orgId = data.organization_id || data.organization?.id;
         const role = data.role || data.role_name;
 
         if (!userId || !orgId) return;
 
-        await prisma.workspaceMember.upsert({
-            where: {
-                userId_workspaceId: {
-                    userId: userId,
-                    workspaceId: orgId
-                }
-            },
-            update: {
-                role: String(role).toUpperCase().includes("ADMIN") ? "ADMIN" : "MEMBER"
-            },
-            create: {
-                userId: userId,
-                workspaceId: orgId,
-                role: String(role).toUpperCase().includes("ADMIN") ? "ADMIN" : "MEMBER"
+        // Ensure the user exists in our database before adding them to a workspace
+        // This handles the race condition where membership.created fires at the same time as user.created
+        await step.run("check-user-exists", async () => {
+            const user = await prisma.user.findUnique({ where: { id: userId } });
+            if (!user) {
+                throw new Error("User not found yet, retrying sync...");
             }
-        })
+        });
+
+        await step.run("upsert-workspace-member", async () => {
+            await prisma.workspaceMember.upsert({
+                where: {
+                    userId_workspaceId: {
+                        userId: userId,
+                        workspaceId: orgId
+                    }
+                },
+                update: {
+                    role: String(role).toUpperCase().includes("ADMIN") ? "ADMIN" : "MEMBER"
+                },
+                create: {
+                    userId: userId,
+                    workspaceId: orgId,
+                    role: String(role).toUpperCase().includes("ADMIN") ? "ADMIN" : "MEMBER"
+                }
+            })
+        });
     }
 )
 
