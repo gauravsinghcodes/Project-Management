@@ -1,5 +1,6 @@
 import { Inngest } from 'inngest';
 import prisma from "../configs/prisma.js";
+import sendEmail from '../configs/nodemailer.js';
 
 export const inngest = new Inngest({ id: "project-management" });
 
@@ -57,7 +58,7 @@ const syncWorkspaceCreation = inngest.createFunction(
     { id: 'sync-workspace-from-clerk', triggers: [{ event: 'clerk/organization.created' }] },
     async ({ event }) => {
         const { data } = event;
-        
+
         // Use upsert to be safe if organization.updated arrived first
         await prisma.workspace.upsert({
             where: { id: data.id },
@@ -142,17 +143,19 @@ const syncWorkspaceDeletion = inngest.createFunction(
 // Inngest Function to save workspace member data to a database
 
 const syncWorkspaceMemberCreation = inngest.createFunction(
-    { id: 'sync-workspace-member-from-clerk', triggers: [
-        { event: 'clerk/organizationMembership.created' },
-        { event: 'clerk/organizationInvitation.accepted' }
-    ] },
+    {
+        id: 'sync-workspace-member-from-clerk', triggers: [
+            { event: 'clerk/organizationMembership.created' },
+            { event: 'clerk/organizationInvitation.accepted' }
+        ]
+    },
     async ({ event }) => {
         const { data } = event;
         const userId = data.user_id || data.public_user_data?.user_id;
         const orgId = data.organization_id;
         const role = data.role || data.role_name;
 
-        if(!userId || !orgId) return;
+        if (!userId || !orgId) return;
 
         await prisma.workspaceMember.upsert({
             where: {
@@ -173,7 +176,119 @@ const syncWorkspaceMemberCreation = inngest.createFunction(
     }
 )
 
+// Inngest Function to send Email on Task Creation
+const sendTaskAssignmentEmail = inngest.createFunction(
+    { id: "send-task-assignment-mail", triggers: [{ event: "app/task.assigned" }] },
+    async ({ event, step }) => {
+        const { taskId, origin } = event.data;
 
+        const task = await step.run('fetch-task', async () => {
+            return await prisma.task.findUnique({
+                where: { id: taskId },
+                include: { assignee: true, project: true }
+            })
+        })
+
+        if (!task || !task.assignee) return;
+
+        await step.run('send-assignment-email', async () => {
+            await sendEmail({
+                to: task.assignee.email,
+                subject: `New Task Assignment in ${task.project.name}`,
+                body: `<div style="max-width: 600px; font-family: sans-serif;">
+        
+                <h2>Hi ${task.assignee.name}, 👋</h2>
+
+                <p style="font-size: 16px;">You've been assigned a new task:</p>
+
+                <p style="font-size: 18px; font-weight: bold; color: #007bff; margin: 8px 0;">
+                ${task.title}
+                </p>
+
+                <div style="border: 1px solid #ddd; padding: 12px 16px; border-radius: 6px; margin-bottom: 30px;">
+        
+                <p style="margin: 6px 0;">
+                <strong>Description:</strong> ${task.description || "No description provided"}
+                </p>
+
+                <p style="margin: 6px 0;">
+                <strong>Due Date:</strong> ${new Date(task.due_date).toLocaleDateString()}
+                </p>
+
+                </div>
+
+                <a href="${origin}/tasks/${task.id}" 
+                style="background-color: #007bff; padding: 12px 24px; border-radius: 5px; color: #fff; font-weight: 600; font-size: 16px; text-decoration: none; display: inline-block;">
+                View Task
+                </a>
+
+                <p style="margin-top: 20px; font-size: 14px; color: #6c757d;">
+                Please make sure to review and complete it before the due date.
+                </p>
+
+                </div>`
+            })
+        })
+
+        const dueDate = new Date(task.due_date);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const dueDateBody = new Date(task.due_date);
+        dueDateBody.setHours(0, 0, 0, 0);
+
+        if (dueDateBody.getTime() > today.getTime()) {
+            await step.sleepUntil('wait-for-the-due-date', task.due_date);
+
+            await step.run('check-if-task-is-completed', async () => {
+                const refreshedTask = await prisma.task.findUnique({
+                    where: { id: taskId },
+                    include: { assignee: true, project: true }
+                })
+
+                if (!refreshedTask || refreshedTask.status === "DONE") return;
+
+                await sendEmail({
+                    to: refreshedTask.assignee.email,
+                    subject: `Reminder for ${refreshedTask.project.name}`,
+                    body: `<div style="max-width: 600px; font-family: sans-serif;">
+
+                    <h2>Hi ${refreshedTask.assignee.name}, 👋</h2>
+
+                    <p style="font-size: 16px;">
+                    You have a task due in ${refreshedTask.project.name}:
+                    </p>
+
+                    <p style="font-size: 18px; font-weight: bold; color: #007bff; margin: 8px 0;">
+                    ${refreshedTask.title}
+                    </p>
+
+                    <div style="border: 1px solid #ddd; padding: 12px 16px; border-radius: 6px; margin-bottom: 30px;">
+        
+                    <p style="margin: 6px 0;">
+                        <strong>Description:</strong> ${refreshedTask.description || "No description provided"}
+                    </p>
+
+                    <p style="margin: 6px 0;">
+                        <strong>Due Date:</strong> ${new Date(refreshedTask.due_date).toLocaleDateString()}
+                        </p>
+
+                    </div>
+
+                    <a href="${origin}/tasks/${refreshedTask.id}" 
+                    style="background-color: #007bff; padding: 12px 24px; border-radius: 5px; color: #fff; font-weight: 600; font-size: 16px; text-decoration: none; display: inline-block;">
+                        View Task
+                    </a>
+
+                        <p style="margin-top: 20px; font-size: 14px; color: #6c757d;">
+                    Please make sure to review and complete it before the due date.
+                    </p>
+
+                    </div>`
+                })
+            })
+        }
+    }
+)
 
 
 export const functions = [
@@ -183,7 +298,8 @@ export const functions = [
     syncWorkspaceCreation,
     syncWorkspaceUpdation,
     syncWorkspaceDeletion,
-    syncWorkspaceMemberCreation
+    syncWorkspaceMemberCreation,
+    sendTaskAssignmentEmail
 ];
 
 
