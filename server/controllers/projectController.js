@@ -22,11 +22,19 @@ export const createProject = async (req, res) => {
             return res.status(403).json({ message: "You dont have permission to create projects in this workspace" });
         }
 
-        // Get Team Lead using email
-        const teamLead = await prisma.user.findUnique({
-            where: { email: team_lead },
-            select: { id: true }
-        })
+        const normalizedLeadEmail = String(team_lead || "").trim().toLowerCase();
+        if (!normalizedLeadEmail) {
+            return res.status(400).json({ message: "Please select a valid project lead" });
+        }
+
+        // Resolve lead from current workspace members to avoid mismatches.
+        const workspaceLeadMember = workspace.members.find(
+            (member) => member.user?.email?.toLowerCase() === normalizedLeadEmail
+        );
+
+        if (!workspaceLeadMember) {
+            return res.status(400).json({ message: "Selected project lead is not a member of this workspace. Refresh and try again." });
+        }
 
         const project = await prisma.project.create({
             data: {
@@ -36,7 +44,7 @@ export const createProject = async (req, res) => {
                 status,
                 priority,
                 progress,
-                team_lead: teamLead?.id,
+                team_lead: workspaceLeadMember.userId,
                 start_date: start_date ? new Date(start_date) : null,
                 end_date: end_date ? new Date(end_date) : null,
             }
@@ -51,11 +59,17 @@ export const createProject = async (req, res) => {
                 }
             })
 
+            // Always include lead in project members list.
+            if (!membersToAdd.includes(workspaceLeadMember.userId)) {
+                membersToAdd.push(workspaceLeadMember.userId)
+            }
+
             await prisma.projectMember.createMany({
                 data: membersToAdd.map(memberId => ({
                     projectId: project.id,
                     userId: memberId
-                }))
+                })),
+                skipDuplicates: true
             })
         }
 
