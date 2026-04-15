@@ -5,8 +5,9 @@ import { Outlet } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import { loadTheme } from '../features/themeSlice'
 import { Loader2Icon } from 'lucide-react'
-import { useUser, SignIn, useAuth, CreateOrganization } from '@clerk/react'
+import { useUser, SignIn, useAuth, CreateOrganization, useOrganizationList } from '@clerk/react'
 import { fetchWorkspaces } from '../features/workspaceSlice'
+import api from '../../configs/api'
 
 const Layout = () => {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false)
@@ -14,6 +15,7 @@ const Layout = () => {
     const dispatch = useDispatch()
     const { user, isLoaded } = useUser()
     const { getToken } = useAuth()
+    const { userMemberships, isLoaded: isOrgLoaded } = useOrganizationList({ userMemberships: true })
 
     // Initial load of theme
     useEffect(() => {
@@ -25,7 +27,37 @@ const Layout = () => {
         if (isLoaded && user && workspaces.length === 0) {
             dispatch(fetchWorkspaces({ getToken }))
         }
-    }, [user, isLoaded])
+    }, [dispatch, user, isLoaded, workspaces.length, getToken])
+
+    // Fallback sync: if webhook/event sync is delayed, persist Clerk orgs directly.
+    useEffect(() => {
+        const syncClerkOrganizations = async () => {
+            if (!isLoaded || !isOrgLoaded || !user) return;
+            if (!userMemberships?.data?.length) return;
+
+            const token = await getToken();
+            if (!token) return;
+
+            await Promise.all(
+                userMemberships.data.map(({ organization }) =>
+                    api.post(
+                        '/api/workspaces/sync-clerk',
+                        {
+                            id: organization.id,
+                            name: organization.name,
+                            slug: organization.slug,
+                            image_url: organization.imageUrl || ''
+                        },
+                        { headers: { Authorization: `Bearer ${token}` } }
+                    )
+                )
+            );
+
+            dispatch(fetchWorkspaces({ getToken }));
+        };
+
+        syncClerkOrganizations();
+    }, [dispatch, getToken, isLoaded, isOrgLoaded, user, userMemberships?.data])
 
 
     if (!user) {
@@ -45,7 +77,7 @@ const Layout = () => {
     if (user && workspaces.length === 0) {
         return (
             <div className='min-h-screen flex justify-center items-center'>
-                <CreateOrganization />
+                <CreateOrganization afterCreateOrganizationUrl="/" />
             </div>
         )
     }

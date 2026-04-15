@@ -84,6 +84,59 @@ export const addMember = async (req, res) => {
     }
 }
 
+// Sync Clerk organization to local workspace store.
+// This avoids UI getting stuck when webhook/event sync is delayed.
+export const syncWorkspaceFromClerk = async (req, res) => {
+    try {
+        const { userId } = await req.auth();
+        const { id, name, slug, image_url } = req.body;
+
+        if (!userId) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+
+        if (!id || !name || !slug) {
+            return res.status(400).json({ message: "Missing required parameters" });
+        }
+
+        const workspace = await prisma.workspace.upsert({
+            where: { id },
+            update: {
+                name,
+                slug,
+                image_url: image_url || ""
+            },
+            create: {
+                id,
+                name,
+                slug,
+                ownerId: userId,
+                image_url: image_url || ""
+            }
+        });
+
+        await prisma.workspaceMember.upsert({
+            where: {
+                userId_workspaceId: {
+                    userId,
+                    workspaceId: id
+                }
+            },
+            update: { role: "ADMIN" },
+            create: {
+                userId,
+                workspaceId: id,
+                role: "ADMIN"
+            }
+        });
+
+        res.json({ workspace, message: "Workspace synced successfully" });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({ message: error.code || error.message });
+    }
+}
+
 
 
 
