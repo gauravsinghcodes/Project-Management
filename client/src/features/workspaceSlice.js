@@ -3,9 +3,9 @@ import { dummyWorkspaces } from "../assets/assets";
 import api from "../../configs/api";
 
 
-export const fetchWorkspaces = createAsyncThunk('workspace/fetchWorkspaces', async ({getToken}) => {
+export const fetchWorkspaces = createAsyncThunk('workspace/fetchWorkspaces', async ({ getToken }) => {
     try {
-        const {data} = await api.get('/api/workspaces', {headers: {Authorization: `Bearer ${await getToken()}`}})
+        const { data } = await api.get('/api/workspaces', { headers: { Authorization: `Bearer ${await getToken()}` } })
         return data.workspaces || []
     } catch (error) {
         console.log(error?.response?.data?.message || error.message)
@@ -49,7 +49,7 @@ const workspaceSlice = createSlice({
             }
         },
         deleteWorkspace: (state, action) => {
-            state.workspaces = state.workspaces.filter((w) => w.id !== action.payload);
+            state.workspaces = state.workspaces.filter((w) => w._id !== action.payload);
         },
         addProject: (state, action) => {
             state.currentWorkspace.projects.push(action.payload);
@@ -106,30 +106,32 @@ const workspaceSlice = createSlice({
             // find workspace and project by id and delete task from it
             state.workspaces = state.workspaces.map((w) =>
                 w.id === state.currentWorkspace.id ? {
-                    ...w, projects: w.projects.map((p) => ({
-                        ...p, tasks: p.tasks.filter((t) => !action.payload.includes(t.id))
-                    }))
+                    ...w, projects: w.projects.map((p) =>
+                        p.id === action.payload.projectId ? {
+                            ...p, tasks: p.tasks.filter((t) => !action.payload.includes(t.id))
+                        } : p
+                    )
                 } : w
             );
         }
 
     },
-    extraReducers: (builder)=>{
+    extraReducers: (builder) => {
         builder.addCase(fetchWorkspaces.pending, (state) => {
             state.loading = true
         });
         builder.addCase(fetchWorkspaces.fulfilled, (state, action) => {
             state.workspaces = action.payload;
-            if(action.payload.length > 0){
+            if (action.payload.length > 0) {
                 const localStorageCurrentWorkspaceId = localStorage.getItem('currentWorkspaceId');
-                if(localStorageCurrentWorkspaceId){
+                if (localStorageCurrentWorkspaceId) {
                     const findWorkspace = action.payload.find(w => w.id === localStorageCurrentWorkspaceId);
-                    if(findWorkspace){
+                    if (findWorkspace) {
                         state.currentWorkspace = findWorkspace
-                    }else{
+                    } else {
                         state.currentWorkspace = action.payload[0]
                     }
-                }else{
+                } else {
                     state.currentWorkspace = action.payload[0]
                 }
             }
