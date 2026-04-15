@@ -61,7 +61,7 @@ export const addMember = async (req, res) => {
         }
 
         // Check if user is already a member
-        const existingMember = await prisma.workspaceMember.find((member)=>member.userId === user.id);
+        const existingMember = await prisma.workspaceMember.findFirst({ where: { userId: user.id, workspaceId } });
         if(existingMember) {
             return res.status(400).json({message: "User is already a member"});
         }
