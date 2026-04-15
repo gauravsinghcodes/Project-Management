@@ -9,14 +9,8 @@ const syncUserCreation = inngest.createFunction(
     { id: 'sync-user-from-clerk', triggers: [{ event: 'clerk/user.created' }] },
     async ({ event }) => {
         const { data } = event
-        await prisma.user.upsert({
-            where: { id: data.id },
-            update: {
-                email: data?.email_addresses[0]?.email_address,
-                name: data?.first_name + " " + data?.last_name,
-                image: data?.image_url,
-            },
-            create: {
+        await prisma.user.create({
+            data: {
                 id: data.id,
                 email: data?.email_addresses[0]?.email_address,
                 name: data?.first_name + " " + data?.last_name,
@@ -24,6 +18,7 @@ const syncUserCreation = inngest.createFunction(
             }
         })
     }
+
 )
 
 // Inngest Function to delete user from database
@@ -45,15 +40,11 @@ const syncUserUpdation = inngest.createFunction(
     { id: 'update-user-from-clerk', triggers: [{ event: 'clerk/user.updated' }] },
     async ({ event }) => {
         const { data } = event
-        await prisma.user.upsert({
-            where: { id: data.id },
-            update: {
-                email: data?.email_addresses[0]?.email_address,
-                name: data?.first_name + " " + data?.last_name,
-                image: data?.image_url,
+        await prisma.user.update({
+            where: {
+                id: data.id
             },
-            create: {
-                id: data.id,
+            data: {
                 email: data?.email_addresses[0]?.email_address,
                 name: data?.first_name + " " + data?.last_name,
                 image: data?.image_url,
@@ -154,55 +145,34 @@ const syncWorkspaceDeletion = inngest.createFunction(
 const syncWorkspaceMemberCreation = inngest.createFunction(
     {
         id: 'sync-workspace-member-from-clerk', triggers: [
-            { event: 'clerk/organization_membership.created' },
             { event: 'clerk/organizationMembership.created' },
-            { event: 'clerk/organization_invitation.accepted' },
             { event: 'clerk/organizationInvitation.accepted' }
         ]
     },
-    async ({ event, step }) => {
+    async ({ event }) => {
         const { data } = event;
-        
-        // Robust ID extraction
-        const userId = data.user_id || data.public_user_data?.user_id || data.id;
-        const orgId = data.organization_id || data.organization?.id;
+        const userId = data.user_id || data.public_user_data?.user_id;
+        const orgId = data.organization_id;
         const role = data.role || data.role_name;
 
-        // For invitation accepted events, data.id might be invitation id, not user id
-        // In that case, we should only proceed if we have a valid userId from other fields
-        const isInvitationEvent = event.name.includes('invitation');
-        const finalUserId = isInvitationEvent ? (data.public_user_data?.user_id || data.user_id) : userId;
+        if (!userId || !orgId) return;
 
-        if (!finalUserId || !orgId) return;
-
-        // Ensure the user exists in our database before adding them to a workspace
-        // This handles the race condition where membership.created fires at the same time as user.created
-        await step.run("check-user-exists", async () => {
-            const user = await prisma.user.findUnique({ where: { id: finalUserId } });
-            if (!user) {
-                // If it's a new user, user.created might still be processing
-                throw new Error(`User ${finalUserId} not found in database yet, retrying sync...`);
-            }
-        });
-
-        await step.run("upsert-workspace-member", async () => {
-            await prisma.workspaceMember.upsert({
-                where: {
-                    userId_workspaceId: {
-                        userId: finalUserId,
-                        workspaceId: orgId
-                    }
-                },
-                update: {
-                    role: String(role).toUpperCase().includes("ADMIN") ? "ADMIN" : "MEMBER"
-                },
-                create: {
-                    userId: finalUserId,
-                    workspaceId: orgId,
-                    role: String(role).toUpperCase().includes("ADMIN") ? "ADMIN" : "MEMBER"
+        await prisma.workspaceMember.upsert({
+            where: {
+                userId_workspaceId: {
+                    userId: userId,
+                    workspaceId: orgId
                 }
-            })
-        });
+            },
+            update: {
+                role: String(role).toUpperCase().includes("ADMIN") ? "ADMIN" : "MEMBER"
+            },
+            create: {
+                userId: userId,
+                workspaceId: orgId,
+                role: String(role).toUpperCase().includes("ADMIN") ? "ADMIN" : "MEMBER"
+            }
+        })
     }
 )
 
