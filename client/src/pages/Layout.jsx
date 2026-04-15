@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Navbar from '../components/Navbar'
 import Sidebar from '../components/Sidebar'
 import { Outlet } from 'react-router-dom'
@@ -16,6 +16,7 @@ const Layout = () => {
     const { user, isLoaded } = useUser()
     const { getToken } = useAuth()
     const { userMemberships, isLoaded: isOrgLoaded } = useOrganizationList({ userMemberships: true })
+    const hasSyncedClerkOrgsRef = useRef(false)
 
     // Initial load of theme
     useEffect(() => {
@@ -34,24 +35,35 @@ const Layout = () => {
         const syncClerkOrganizations = async () => {
             if (!isLoaded || !isOrgLoaded || !user) return;
             if (!userMemberships?.data?.length) return;
+            if (hasSyncedClerkOrgsRef.current) return;
 
             const token = await getToken();
             if (!token) return;
 
-            await Promise.all(
-                userMemberships.data.map(({ organization }) =>
-                    api.post(
-                        '/api/workspaces/sync-clerk',
-                        {
-                            id: organization.id,
-                            name: organization.name,
-                            slug: organization.slug,
-                            image_url: organization.imageUrl || ''
-                        },
-                        { headers: { Authorization: `Bearer ${token}` } }
+            try {
+                await Promise.all(
+                    userMemberships.data.map(({ organization, role }) =>
+                        api.post(
+                            '/api/workspaces/sync-clerk',
+                            {
+                                id: organization.id,
+                                name: organization.name,
+                                slug: organization.slug,
+                                image_url: organization.imageUrl || '',
+                                ownerName: user.fullName || user.firstName || "User",
+                                ownerEmail: user.primaryEmailAddress?.emailAddress || user.emailAddresses?.[0]?.emailAddress || '',
+                                ownerImage: user.imageUrl || '',
+                                memberRole: role
+                            },
+                            { headers: { Authorization: `Bearer ${token}` } }
+                        )
                     )
-                )
-            );
+                );
+                hasSyncedClerkOrgsRef.current = true;
+            } catch (error) {
+                // Avoid flooding console/network when backend route isn't live yet.
+                console.log(error?.response?.data?.message || error.message);
+            }
 
             dispatch(fetchWorkspaces({ getToken }));
         };

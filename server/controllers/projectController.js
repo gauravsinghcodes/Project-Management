@@ -138,19 +138,26 @@ export const addMember = async (req, res) => {
         // Check if user is project lead
         const project = await prisma.project.findUnique({
             where: { id: projectId },
-            include: { members: { include: { user: true } } }
+            include: {
+                members: { include: { user: true } },
+                workspace: { include: { members: true } }
+            }
         })
 
         if (!project) {
             return res.status(404).json({ message: "Project not found" });
         }
 
-        if (project.team_lead !== userId) {
-            return res.status(404).json({ message: "Only project lead can add members" });
+        const isWorkspaceAdmin = project.workspace?.members?.some(
+            (member) => member.userId === userId && member.role === "ADMIN"
+        );
+
+        if (project.team_lead !== userId && !isWorkspaceAdmin) {
+            return res.status(403).json({ message: "Only project lead can add members" });
         }
 
         // Check if user is already a member
-        const existingMember = project.members.find((member) => member.email === email)
+        const existingMember = project.members.find((member) => member.user.email === email)
 
 
         if (existingMember) {
@@ -160,6 +167,11 @@ export const addMember = async (req, res) => {
         const user = await prisma.user.findUnique({ where: { email } });
         if (!user) {
             return res.status(404).json({ message: "User not found" });
+        }
+
+        const isWorkspaceMember = project.workspace?.members?.some((member) => member.userId === user.id);
+        if (!isWorkspaceMember) {
+            return res.status(400).json({ message: "User is not part of this workspace" });
         }
 
         const member = await prisma.projectMember.create({

@@ -1,7 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { UsersIcon, Search, UserPlus, Shield, Activity } from "lucide-react";
 import InviteMemberDialog from "../components/InviteMemberDialog";
-import { useSelector } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
+import { useAuth, useOrganization } from "@clerk/react";
+import { fetchWorkspaces } from "../features/workspaceSlice";
+import api from "../../configs/api";
 
 const Team = () => {
 
@@ -9,6 +12,13 @@ const Team = () => {
     const [searchTerm, setSearchTerm] = useState("");
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [users, setUsers] = useState([]);
+    const hasFetchedRef = useRef(false);
+    const hasSyncedMembersRef = useRef(false);
+    const dispatch = useDispatch();
+    const { getToken } = useAuth();
+    const { organization, memberships, isLoaded: isOrganizationLoaded } = useOrganization({
+        memberships: true
+    });
     const currentWorkspace = useSelector((state) => state?.workspace?.currentWorkspace || null);
     const projects = currentWorkspace?.projects || [];
 
@@ -22,6 +32,54 @@ const Team = () => {
         setUsers(currentWorkspace?.members || []);
         setTasks(currentWorkspace?.projects?.reduce((acc, project) => [...acc, ...project.tasks], []) || []);
     }, [currentWorkspace]);
+
+    useEffect(() => {
+        if (hasFetchedRef.current) return;
+        hasFetchedRef.current = true;
+        dispatch(fetchWorkspaces({ getToken }));
+    }, [dispatch, getToken]);
+
+    useEffect(() => {
+        const onWindowFocus = () => dispatch(fetchWorkspaces({ getToken }));
+        window.addEventListener("focus", onWindowFocus);
+        return () => window.removeEventListener("focus", onWindowFocus);
+    }, [dispatch, getToken]);
+
+    useEffect(() => {
+        const syncClerkMembers = async () => {
+            if (!isOrganizationLoaded || !organization || !currentWorkspace) return;
+            if (organization.id !== currentWorkspace.id) return;
+            if (!memberships?.data?.length) return;
+            if (hasSyncedMembersRef.current) return;
+
+            const token = await getToken();
+            if (!token) return;
+
+            await Promise.all(
+                memberships.data.map((membership) =>
+                    api.post(
+                        "/api/workspaces/sync-clerk-member",
+                        {
+                            workspaceId: organization.id,
+                            memberUserId: membership.publicUserData?.userId,
+                            memberEmail: membership.publicUserData?.identifier || "",
+                            memberName: `${membership.publicUserData?.firstName || ""} ${membership.publicUserData?.lastName || ""}`.trim(),
+                            memberImage: membership.publicUserData?.imageUrl || "",
+                            memberRole: membership.role
+                        },
+                        { headers: { Authorization: `Bearer ${token}` } }
+                    )
+                )
+            );
+
+            hasSyncedMembersRef.current = true;
+            dispatch(fetchWorkspaces({ getToken }));
+        };
+
+        syncClerkMembers().catch((error) => {
+            console.log(error?.response?.data?.message || error.message);
+        });
+    }, [isOrganizationLoaded, organization, memberships?.data, currentWorkspace, getToken, dispatch]);
 
     return (
         <div className="space-y-6 max-w-6xl mx-auto">

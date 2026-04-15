@@ -4,17 +4,46 @@ import sendEmail from '../configs/nodemailer.js';
 
 export const inngest = new Inngest({ id: "project-management" });
 
+const ensureUserExists = async (userId, profile = {}) => {
+    if (!userId) return;
+
+    const normalizedEmail = profile.email || `${userId}@clerk.local`;
+    const normalizedName = profile.name || "Clerk User";
+    const normalizedImage = profile.image || "";
+
+    await prisma.user.upsert({
+        where: { id: userId },
+        update: {
+            email: normalizedEmail,
+            name: normalizedName,
+            image: normalizedImage
+        },
+        create: {
+            id: userId,
+            email: normalizedEmail,
+            name: normalizedName,
+            image: normalizedImage
+        }
+    });
+};
+
 // Inngest Function to save user data to a database
 const syncUserCreation = inngest.createFunction(
     { id: 'sync-user-from-clerk', triggers: [{ event: 'clerk/user.created' }] },
     async ({ event }) => {
         const { data } = event
-        await prisma.user.create({
-            data: {
+        await prisma.user.upsert({
+            where: { id: data.id },
+            update: {
+                email: data?.email_addresses?.[0]?.email_address || `${data.id}@clerk.local`,
+                name: `${data?.first_name || ""} ${data?.last_name || ""}`.trim() || "Clerk User",
+                image: data?.image_url || ""
+            },
+            create: {
                 id: data.id,
-                email: data?.email_addresses[0]?.email_address,
-                name: data?.first_name + " " + data?.last_name,
-                image: data?.image_url,
+                email: data?.email_addresses?.[0]?.email_address || `${data.id}@clerk.local`,
+                name: `${data?.first_name || ""} ${data?.last_name || ""}`.trim() || "Clerk User",
+                image: data?.image_url || ""
             }
         })
     }
@@ -58,6 +87,7 @@ const syncWorkspaceCreation = inngest.createFunction(
     { id: 'sync-workspace-from-clerk', triggers: [{ event: 'clerk/organization.created' }] },
     async ({ event }) => {
         const { data } = event;
+        await ensureUserExists(data.created_by);
 
         // Use upsert to be safe if organization.updated arrived first
         await prisma.workspace.upsert({
@@ -103,6 +133,7 @@ const syncWorkspaceUpdation = inngest.createFunction(
     { id: 'update-workspace-from-clerk', triggers: [{ event: 'clerk/organization.updated' }] },
     async ({ event }) => {
         const { data } = event;
+        await ensureUserExists(data.created_by);
         await prisma.workspace.upsert({
             where: {
                 id: data.id
@@ -154,8 +185,12 @@ const syncWorkspaceMemberCreation = inngest.createFunction(
         const userId = data.user_id || data.public_user_data?.user_id;
         const orgId = data.organization_id;
         const role = data.role || data.role_name;
+        const email = data.public_user_data?.identifier;
+        const fullName = `${data.public_user_data?.first_name || ""} ${data.public_user_data?.last_name || ""}`.trim();
+        const image = data.public_user_data?.image_url || "";
 
         if (!userId || !orgId) return;
+        await ensureUserExists(userId, { email, name: fullName || "Clerk User", image });
 
         await prisma.workspaceMember.upsert({
             where: {

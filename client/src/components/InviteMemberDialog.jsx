@@ -21,7 +21,7 @@ const InviteMemberDialog = ({ isDialogOpen, setIsDialogOpen }) => {
         setIsSubmitting(true);
         try {
             await organization.inviteMember({emailAddress: formData.email, role: formData.role})
-            toast.success("Invitation sent successfully")
+            toast.success("Invitation sent. Member appears after they accept.")
             setIsDialogOpen(false)
         } catch (error) {
             console.log(error);

@@ -117,7 +117,8 @@ const workspaceSlice = createSlice({
     },
     extraReducers: (builder) => {
         builder.addCase(fetchWorkspaces.pending, (state) => {
-            state.loading = true
+            // Only show full-screen loader on initial bootstrap.
+            state.loading = state.workspaces.length === 0
         });
         builder.addCase(fetchWorkspaces.fulfilled, (state, action) => {
             state.workspaces = action.payload;
